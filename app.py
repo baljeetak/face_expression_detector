@@ -1,6 +1,6 @@
 import os
 import time
-# Fix for TensorFlow 2.20.0
+# CRITICAL: Fix for TensorFlow 2.20.0 / Keras 3 compatibility
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 
 import streamlit as st
@@ -11,24 +11,27 @@ import numpy as np
 from datetime import datetime
 import av
 
-# --- CONFIG ---
+# --- 1. CONFIGURATION ---
+st.set_page_config(page_title="Emotion Recorder", layout="wide")
+
 SAVE_DIR = "recordings"
 if not os.path.exists(SAVE_DIR):
     os.makedirs(SAVE_DIR)
 
-st.title("Cloud Expression Recorder (20s Limit) 🎥")
+st.title("Face Expression Detector & Recorder 🎥")
 
+# --- 2. VIDEO PROCESSING CLASS (20s Limit) ---
 class VideoTransformer(VideoTransformerBase):
     def __init__(self):
         self.out = None
         self.recording = False
         self.start_time = None
-        self.limit = 20  # Seconds
+        self.limit = 20  # Automatic stop after 20 seconds
 
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
 
-        # 1. Emotion Analysis
+        # Emotion Analysis
         try:
             results = DeepFace.analyze(img, actions=['emotion'], enforce_detection=False)
             for res in results:
@@ -39,27 +42,26 @@ class VideoTransformer(VideoTransformerBase):
         except:
             pass
 
-        # 2. Timer & Recording Logic
+        # Timer & Recording Logic
         if self.recording:
             if self.start_time is None:
                 self.start_time = time.time()
                 ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                path = os.path.join(SAVE_DIR, f"auto_vid_{ts}.mp4")
+                path = os.path.join(SAVE_DIR, f"vid_{ts}.mp4")
+                # Using 'mp4v' for internal server saving
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 h, w = img.shape[:2]
                 self.out = cv2.VideoWriter(path, fourcc, 20.0, (w, h))
 
-            # Check if 20 seconds have passed
             elapsed = time.time() - self.start_time
             if elapsed >= self.limit:
-                self.recording = False  # Auto-stop
+                self.recording = False  # Auto-stop after 20 seconds
             else:
-                # Add a "Seconds Left" countdown on the video itself
+                # Add countdown text to the live video feed
                 countdown = int(self.limit - elapsed)
-                cv2.putText(img, f"Ends in: {countdown}s", (10, 30), 
+                cv2.putText(img, f"REC: {countdown}s left", (10, 50), 
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 self.out.write(img)
-
         else:
             if self.out is not None:
                 self.out.release()
@@ -68,7 +70,7 @@ class VideoTransformer(VideoTransformerBase):
 
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
-# --- UI ---
+# --- 3. MAIN INTERFACE ---
 ctx = webrtc_streamer(
     key="emotion-recorder",
     video_transformer_factory=VideoTransformer,
@@ -77,30 +79,32 @@ ctx = webrtc_streamer(
 )
 
 if ctx.video_transformer:
-    if st.button("🎬 START 20s RECORDING"):
+    if st.button("🎬 START 20s RECORDING", use_container_width=True, type="primary"):
         ctx.video_transformer.recording = True
-
-# --- ADMIN SECTION (In the Sidebar) ---
-st.sidebar.title("Admin: Saved Videos")
-
-# Check what is inside the recordings folder
-if os.path.exists(SAVE_DIR):
-    all_videos = os.listdir(SAVE_DIR)
-    
-    if all_videos:
-        # Show a list of videos in a dropdown menu
-        selected_video = st.sidebar.selectbox("Select a video to watch:", all_videos)
         
-        # When you select one, show a "Play" button
-        if st.sidebar.button("Play Selected Video"):
+    if ctx.video_transformer.recording:
+        st.error("🔴 RECORDING IN PROGRESS... (Auto-stops at 20s)")
+    else:
+        st.info("⚪ STANDBY - Click Start to record a new session.")
+
+# --- 4. SECRET SIDEBAR (The "Window" into the Server) ---
+st.sidebar.title("📁 Server Recordings")
+st.sidebar.write("Videos saved on the cloud server:")
+
+if os.path.exists(SAVE_DIR):
+    files = [f for f in os.listdir(SAVE_DIR) if f.endswith(".mp4")]
+    
+    if files:
+        selected_video = st.sidebar.selectbox("Select a recording:", files)
+        
+        if st.sidebar.button("▶️ Play Selected"):
             video_path = os.path.join(SAVE_DIR, selected_video)
             with open(video_path, 'rb') as f:
                 st.sidebar.video(f.read())
+                
+        if st.sidebar.button("🗑️ Delete All (Clear Server)"):
+            for f in files:
+                os.remove(os.path.join(SAVE_DIR, f))
+            st.rerun()
     else:
-        st.sidebar.write("No videos saved yet.")
-        
-    if ctx.video_transformer.recording:
-        st.error("🔴 RECORDING... (Will stop automatically)")
-    else:
-
-        st.info("⚪ STANDBY - Click Start to record for 20 seconds.")
+        st.sidebar.write("No videos found yet.")
