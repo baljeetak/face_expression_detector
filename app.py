@@ -79,8 +79,28 @@ ctx = webrtc_streamer(
 if ctx.video_transformer:
     if st.button("🎬 START 20s RECORDING"):
         ctx.video_transformer.recording = True
+
+# --- ADMIN SECTION (In the Sidebar) ---
+st.sidebar.title("Admin: Saved Videos")
+
+# Check what is inside the recordings folder
+if os.path.exists(SAVE_DIR):
+    all_videos = os.listdir(SAVE_DIR)
+    
+    if all_videos:
+        # Show a list of videos in a dropdown menu
+        selected_video = st.sidebar.selectbox("Select a video to watch:", all_videos)
+        
+        # When you select one, show a "Play" button
+        if st.sidebar.button("Play Selected Video"):
+            video_path = os.path.join(SAVE_DIR, selected_video)
+            with open(video_path, 'rb') as f:
+                st.sidebar.video(f.read())
+    else:
+        st.sidebar.write("No videos saved yet.")
         
     if ctx.video_transformer.recording:
         st.error("🔴 RECORDING... (Will stop automatically)")
     else:
+
         st.info("⚪ STANDBY - Click Start to record for 20 seconds.")
